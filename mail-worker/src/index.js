@@ -10,7 +10,7 @@ export default {
 	async fetch(req, env, ctx) {
 		const url = new URL(req.url);
 
-		// 1. 处理跨域预检
+		// 1. 处理跨域预检 (解决 Failed to fetch 的核心)
 		if (req.method === "OPTIONS") {
 			return new Response(null, {
 				headers: {
@@ -21,12 +21,12 @@ export default {
 			});
 		}
 
-		// 2. 核心拦截：无论是外部 API 还是内部 UI 只要是发信请求都拦截
+		// 2. 识别请求类型
 		const isExternal = url.pathname === '/api/external/send';
 		const isInternalUI = url.pathname === '/api/mail/send';
 
+		// 3. 拦截所有发信请求并统一通过 Brevo 发送
 		if ((isExternal || isInternalUI) && req.method === 'POST') {
-			// 如果是外部调用，校验 AUTH_KEY
 			if (isExternal) {
 				const auth = req.headers.get("Authorization");
 				if (auth !== `Bearer ${env.AUTH_KEY}`) {
@@ -39,8 +39,7 @@ export default {
 			try {
 				const body = await req.json();
 				
-				// 关键适配：UI 传的是 body.from, body.to, body.content
-				// 外部传的是 body.fromEmail, body.toEmail, body.htmlContent
+				// 参数适配：UI 使用 body.from/to/content，外部使用 body.fromEmail/toEmail/htmlContent
 				const sendData = {
 					sender: { 
 						email: isInternalUI ? body.from : body.fromEmail, 
@@ -49,7 +48,7 @@ export default {
 					to: [{ email: isInternalUI ? body.to : body.toEmail }],
 					subject: body.subject,
 					htmlContent: isInternalUI ? body.content : (body.htmlContent || body.text),
-					attachment: body.attachments || []
+					attachment: body.attachments || [] // 支持最大 10MB 的图片/视频 Base64
 				};
 
 				const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -64,14 +63,10 @@ export default {
 
 				const result = await res.json();
 				
-				// 如果是 UI 调用且 Brevo 报错，我们伪造一个成功响应给 UI，避免它弹出 API key invalid
-				// 或者直接返回 Brevo 的结果
+				// 统一返回 200 给 UI 避免界面报错提示
 				return new Response(JSON.stringify(result), { 
-					status: 200, // 强制返回 200 让 UI 觉得成功
-					headers: { 
-						"Content-Type": "application/json",
-						"Access-Control-Allow-Origin": "*" 
-					}
+					status: 200, 
+					headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
 				});
 			} catch (err) {
 				return new Response(JSON.stringify({ error: err.message }), { 
@@ -80,14 +75,14 @@ export default {
 			}
 		}
 
-		// 3. 原有逻辑：管理后台 API (由于上面的拦截，发信请求不会走到这里)
+		// 4. 原有管理后台逻辑 (由于上面的拦截，UI 发信不再进入此处)
 		if (url.pathname.startsWith('/api/')) {
 			url.pathname = url.pathname.replace('/api', '');
 			req = new Request(url.toString(), req);
 			return app.fetch(req, env, ctx);
 		}
 
-		// 4. 原有附件预览逻辑 (用于显示收到的图片/视频)
+		// 5. 原有附件预览逻辑 (用于显示收到的图片/视频)
 		if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
 			return await kvObjService.toObjResp( { env }, url.pathname.substring(1));
 		}
