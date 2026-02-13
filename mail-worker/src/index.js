@@ -19,12 +19,14 @@ export default {
 			return new Response(null, { headers: corsHeaders });
 		}
 
+		// 拦截所有发信路径：支持原版 UI (/api/mail/send) 和自定义接口 (/api/external/send)
 		const isExternal = url.pathname === '/api/external/send';
 		const isInternalUI = url.pathname.includes('/mail/send');
 
 		if ((isExternal || isInternalUI) && req.method === 'POST') {
 			if (isExternal) {
 				const auth = req.headers.get("Authorization");
+				// 对应你设置的 AUTH_KEY: woshinibaba
 				if (auth !== `Bearer ${env.AUTH_KEY}`) {
 					return new Response(JSON.stringify({ error: "Unauthorized" }), { 
 						status: 401, headers: corsHeaders 
@@ -34,14 +36,16 @@ export default {
 
 			try {
 				const body = await req.json();
+				
+				// 构造发送给 Brevo 的数据
 				const sendData = {
 					sender: { 
-						email: body.from || body.fromEmail, 
+						email: isInternalUI ? body.from : body.fromEmail, 
 						name: env.admin || "Cloud Mail Service" 
 					},
-					to: [{ email: body.to || body.toEmail }],
-					subject: body.subject,
-					htmlContent: body.content || body.htmlContent || body.text,
+					to: [{ email: isInternalUI ? body.to : body.toEmail }],
+					subject: body.subject || "No Subject",
+					htmlContent: isInternalUI ? body.content : (body.htmlContent || body.text || "No Content"),
 					attachment: body.attachments || [] 
 				};
 
@@ -57,7 +61,8 @@ export default {
 
 				const result = await res.json();
 				
-				// 关键：如果 Brevo 返回错误，我们将错误详情返回给前端
+				// 强制返回 200 给 UI，并将 Brevo 的原始响应原样返回
+				// 这样你可以在 F12 -> Network -> Response 中看到具体报错原因
 				return new Response(JSON.stringify(result), { 
 					status: 200, 
 					headers: { "Content-Type": "application/json", ...corsHeaders }
@@ -69,6 +74,7 @@ export default {
 			}
 		}
 
+		// 原有逻辑
 		if (url.pathname.startsWith('/api/')) {
 			url.pathname = url.pathname.replace('/api', '');
 			req = new Request(url.toString(), req);
