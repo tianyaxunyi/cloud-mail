@@ -8,7 +8,9 @@ import oauthService from "./service/oauth-service";
 
 export default {
 	async fetch(req, env, ctx) {
-		const url = new URL(req.url)// --- 1. 处理 CORS 预检请求 (解决 Failed to fetch 的核心) ---
+		const url = new URL(req.url)
+		
+		// --- 1. 处理 CORS 预检请求 (解决 Failed to fetch 的核心) ---
         if (req.method === "OPTIONS") {
             return new Response(null, {
                 headers: {
@@ -47,13 +49,11 @@ export default {
                         to: [{ email: body.toEmail }],
                         subject: body.subject,
                         htmlContent: body.htmlContent || body.text,
-                        // 转发附件：Brevo 限制单次 10MB
-                        attachment: body.attachments 
+                        attachment: body.attachments // 支持图片/视频 Base64
                     })
                 });
 
                 const result = await res.json();
-                // 返回结果时必须带上 CORS 头
                 return new Response(JSON.stringify(result), { 
                     status: res.status,
                     headers: { 
@@ -68,6 +68,22 @@ export default {
                 });
             }
         }
+
+        // --- 原有逻辑保持不变 ---
+        if (url.pathname.startsWith('/api/')) {
+            url.pathname = url.pathname.replace('/api', '')
+            req = new Request(url.toString(), req)
+            return app.fetch(req, env, ctx);
+        }
+
+        if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
+            return await kvObjService.toObjResp({ env }, url.pathname.substring(1));
+        }
+
+        return env.assets.fetch(req);
+    },
+    // ... email 和 scheduled 保持不变
+};
 
         // --- 3. 原有逻辑：管理后台 API ---
         if (url.pathname.startsWith('/api/')) {
