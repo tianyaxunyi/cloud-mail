@@ -9,8 +9,6 @@ import oauthService from "./service/oauth-service";
 export default {
 	async fetch(req, env, ctx) {
 		const url = new URL(req.url);
-
-		// 1. 跨域预检处理
 		const corsHeaders = {
 			"Access-Control-Allow-Origin": "*",
 			"Access-Control-Allow-Methods": "POST, OPTIONS, GET",
@@ -21,12 +19,10 @@ export default {
 			return new Response(null, { headers: corsHeaders });
 		}
 
-		// 2. 判定请求路径
 		const isExternal = url.pathname === '/api/external/send';
 		const isInternalUI = url.pathname.includes('/mail/send');
 
 		if ((isExternal || isInternalUI) && req.method === 'POST') {
-			// 只有外部 API 调用才强制检查 AUTH_KEY
 			if (isExternal) {
 				const auth = req.headers.get("Authorization");
 				if (auth !== `Bearer ${env.AUTH_KEY}`) {
@@ -38,8 +34,6 @@ export default {
 
 			try {
 				const body = await req.json();
-				
-				// 适配逻辑
 				const sendData = {
 					sender: { 
 						email: body.from || body.fromEmail, 
@@ -63,7 +57,7 @@ export default {
 
 				const result = await res.json();
 				
-				// 即使 Brevo 报错也给 UI 返回 200，防止它弹出“API key invalid”
+				// 关键：如果 Brevo 返回错误，我们将错误详情返回给前端
 				return new Response(JSON.stringify(result), { 
 					status: 200, 
 					headers: { "Content-Type": "application/json", ...corsHeaders }
@@ -75,7 +69,6 @@ export default {
 			}
 		}
 
-		// 3. 其他原有逻辑
 		if (url.pathname.startsWith('/api/')) {
 			url.pathname = url.pathname.replace('/api', '');
 			req = new Request(url.toString(), req);
@@ -88,9 +81,7 @@ export default {
 
 		return env.assets.fetch(req);
 	},
-
 	email: email,
-
 	async scheduled(c, env, ctx) {
 		await verifyRecordService.clearRecord({ env })
 		await userService.resetDaySendCount({ env })
