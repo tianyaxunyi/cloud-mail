@@ -6,34 +6,34 @@ keep_vars = true
 [observability]
 enabled = true
 
-#[[d1_databases]]
-#binding = "db"			#d1数据库绑定名默认不可修改
-#database_name = ""		#d1数据库名字
-#database_id = ""		#d1数据库id
+# --- 数据库与存储绑定 (必须取消注释并填入 ID) ---
+[[d1_databases]]
+binding = "db"
+database_name = "email" 
+database_id = "e840dc21-7209-44d0-a80e-bafc40395b7a"
 
-#[[kv_namespaces]]
-#binding = "kv"			#kv绑定名默认不可修改
-#id = ""					#kv数据库id
-
-#[[r2_buckets]]
-#binding = "r2"			#r2对象存储绑定名默认不可修改
-#bucket_name = ""		#r2对象存储桶的名字
+[[r2_buckets]]
+binding = "r2"
+bucket_name = "email" # 用于存放图片/视频附件
 
 [assets]
-binding = "assets"		#静态资源绑定名默认不可修改
-directory = "./dist"	#前端vue项目打包的静态资源存放位置,默认dist
+binding = "assets"
+directory = "./dist"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
 [triggers]
-crons = ["0 16 * * *"]	#定时任务每天晚上12点执行
+crons = ["0 16 * * *"] # 每天执行定时任务
 
-
-#[vars]
-#orm_log = false
-#domain = []				#邮件域名可可配置多个 示例: ["example1.com","example2.com"]
-#admin = ""				#管理员的邮箱	示例: admin@example.com
-#jwt_secret = ""			#jwt令牌的密钥,随便填一串字符串
+# --- 变量配置 (参考图 image_dc2cf4.png) ---
+[vars]
+orm_log = false
+admin = "lala@pj.edu.kg"
+# 注意：domain 这里要和后台 JSON 格式对应
+domain = ["pj.edu.kg", "ava.us.ci"] 
+jwt_secret = "1102"
+# 添加你在 Brevo 设置的授权密钥
+AUTH_KEY = "woshinibaba"
 
 [build]
 command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run build"
