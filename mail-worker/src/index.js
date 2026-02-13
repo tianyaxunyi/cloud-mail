@@ -10,22 +10,22 @@ export default {
 	async fetch(req, env, ctx) {
 		const url = new URL(req.url);
 
-		// 1. 处理跨域预检 (解决 Failed to fetch 的核心)
+		// 1. 强制处理所有 OPTIONS 请求 (解决 CORS 和 Mixed Content 预检)
 		if (req.method === "OPTIONS") {
 			return new Response(null, {
 				headers: {
 					"Access-Control-Allow-Origin": "*",
-					"Access-Control-Allow-Methods": "POST, OPTIONS",
+					"Access-Control-Allow-Methods": "POST, OPTIONS, GET",
 					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+					"Access-Control-Max-Age": "86400",
 				}
 			});
 		}
 
-		// 2. 识别请求类型
+		// 2. 拦截发信路由：无论是外部调用还是 UI 内部点击发送
 		const isExternal = url.pathname === '/api/external/send';
 		const isInternalUI = url.pathname === '/api/mail/send';
 
-		// 3. 拦截所有发信请求并统一通过 Brevo 发送
 		if ((isExternal || isInternalUI) && req.method === 'POST') {
 			if (isExternal) {
 				const auth = req.headers.get("Authorization");
@@ -39,7 +39,7 @@ export default {
 			try {
 				const body = await req.json();
 				
-				// 参数适配：UI 使用 body.from/to/content，外部使用 body.fromEmail/toEmail/htmlContent
+				// 参数适配：UI 传 from/to/content，外部 API 传 fromEmail/toEmail/htmlContent
 				const sendData = {
 					sender: { 
 						email: isInternalUI ? body.from : body.fromEmail, 
@@ -48,7 +48,7 @@ export default {
 					to: [{ email: isInternalUI ? body.to : body.toEmail }],
 					subject: body.subject,
 					htmlContent: isInternalUI ? body.content : (body.htmlContent || body.text),
-					attachment: body.attachments || [] // 支持最大 10MB 的图片/视频 Base64
+					attachment: body.attachments || [] 
 				};
 
 				const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -63,26 +63,30 @@ export default {
 
 				const result = await res.json();
 				
-				// 统一返回 200 给 UI 避免界面报错提示
+				// 返回 200 成功状态码给 UI，防止界面弹出错误
 				return new Response(JSON.stringify(result), { 
 					status: 200, 
-					headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+					headers: { 
+						"Content-Type": "application/json", 
+						"Access-Control-Allow-Origin": "*" 
+					}
 				});
 			} catch (err) {
 				return new Response(JSON.stringify({ error: err.message }), { 
-					status: 500, headers: { "Access-Control-Allow-Origin": "*" } 
+					status: 500, 
+					headers: { "Access-Control-Allow-Origin": "*" } 
 				});
 			}
 		}
 
-		// 4. 原有管理后台逻辑 (由于上面的拦截，UI 发信不再进入此处)
+		// 3. 原有管理后台逻辑 (跳过已拦截的发信请求)
 		if (url.pathname.startsWith('/api/')) {
 			url.pathname = url.pathname.replace('/api', '');
 			req = new Request(url.toString(), req);
 			return app.fetch(req, env, ctx);
 		}
 
-		// 5. 原有附件预览逻辑 (用于显示收到的图片/视频)
+		// 4. 静态资源与 R2 附件读取 (用于显示收到的图片/视频)
 		if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
 			return await kvObjService.toObjResp( { env }, url.pathname.substring(1));
 		}
