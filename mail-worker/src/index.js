@@ -7,91 +7,79 @@ import kvObjService from './service/kv-obj-service';
 import oauthService from "./service/oauth-service";
 
 export default {
-	async fetch(req, env, ctx) {
-		const url = new URL(req.url);
-		const corsHeaders = {
-			"Access-Control-Allow-Origin": "*",
-			"Access-Control-Allow-Methods": "POST, OPTIONS, GET",
-			"Access-Control-Allow-Headers": "Content-Type, Authorization",
-		};
+    async fetch(req, env, ctx) {
+        const url = new URL(req.url);
+        const corsHeaders = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        };
 
-		if (req.method === "OPTIONS") {
-			return new Response(null, { headers: corsHeaders });
-		}
+        if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-		// 拦截所有发信路径：支持原版 UI (/api/mail/send) 和自定义接口 (/api/external/send)
-		const isExternal = url.pathname === '/api/external/send';
-		const isInternalUI = url.pathname.includes('/mail/send');
+        const isExternal = url.pathname === '/api/external/send';
+        const isInternalUI = url.pathname.includes('/mail/send');
 
-		if ((isExternal || isInternalUI) && req.method === 'POST') {
-			if (isExternal) {
-				const auth = req.headers.get("Authorization");
-				// 对应你设置的 AUTH_KEY: woshinibaba
-				if (auth !== `Bearer ${env.AUTH_KEY}`) {
-					return new Response(JSON.stringify({ error: "Unauthorized" }), { 
-						status: 401, headers: corsHeaders 
-					});
-				}
-			}
+        if ((isExternal || isInternalUI) && req.method === 'POST') {
+            // 外部脚本校验，内部 UI 直接通过
+            if (isExternal) {
+                const auth = req.headers.get("Authorization");
+                if (auth !== `Bearer ${env.AUTH_KEY}`) {
+                    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+                }
+            }
 
-			try {
-				const body = await req.json();
-				
-				// 构造发送给 Brevo 的数据
-				const sendData = {
-					sender: { 
-						email: isInternalUI ? body.from : body.fromEmail, 
-						name: env.admin || "Cloud Mail Service" 
-					},
-					to: [{ email: isInternalUI ? body.to : body.toEmail }],
-					subject: body.subject || "No Subject",
-					htmlContent: isInternalUI ? body.content : (body.htmlContent || body.text || "No Content"),
-					attachment: body.attachments || [] 
-				};
+            try {
+                const body = await req.json();
+                const sendData = {
+                    sender: { email: body.from || body.fromEmail, name: env.admin || "Cloud Mail" },
+                    to: [{ email: body.to || body.toEmail }],
+                    subject: body.subject || "No Subject",
+                    htmlContent: body.content || body.htmlContent || body.text || "Empty",
+                    attachment: body.attachments || []
+                };
 
-				const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-					method: "POST",
-					headers: {
-						"api-key": env.BREVO_API_KEY,
-						"content-type": "application/json",
-						"accept": "application/json"
-					},
-					body: JSON.stringify(sendData)
-				});
+                const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+                    method: "POST",
+                    headers: {
+                        "api-key": env.BREVO_API_KEY,
+                        "content-type": "application/json"
+                    },
+                    body: JSON.stringify(sendData)
+                });
 
-				const result = await res.json();
-				
-				// 强制返回 200 给 UI，并将 Brevo 的原始响应原样返回
-				// 这样你可以在 F12 -> Network -> Response 中看到具体报错原因
-				return new Response(JSON.stringify(result), { 
-					status: 200, 
-					headers: { "Content-Type": "application/json", ...corsHeaders }
-				});
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { 
-					status: 500, headers: corsHeaders 
-				});
-			}
-		}
+                const result = await res.json();
+                
+                // 无论 Brevo 结果如何，给 UI 返回 200，防止触发前端 Promise Object 错误
+                return new Response(JSON.stringify(result), { 
+                    status: 200, 
+                    headers: { "Content-Type": "application/json", ...corsHeaders } 
+                });
+            } catch (err) {
+                return new Response(JSON.stringify({ message: "Internal Error", error: err.message }), { 
+                    status: 200, // 降级处理
+                    headers: { "Content-Type": "application/json", ...corsHeaders } 
+                });
+            }
+        }
 
-		// 原有逻辑
-		if (url.pathname.startsWith('/api/')) {
-			url.pathname = url.pathname.replace('/api', '');
-			req = new Request(url.toString(), req);
-			return app.fetch(req, env, ctx);
-		}
+        if (url.pathname.startsWith('/api/')) {
+            url.pathname = url.pathname.replace('/api', '');
+            req = new Request(url.toString(), req);
+            return app.fetch(req, env, ctx);
+        }
 
-		if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
-			return await kvObjService.toObjResp( { env }, url.pathname.substring(1));
-		}
+        if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
+            return await kvObjService.toObjResp( { env }, url.pathname.substring(1));
+        }
 
-		return env.assets.fetch(req);
-	},
-	email: email,
-	async scheduled(c, env, ctx) {
-		await verifyRecordService.clearRecord({ env })
-		await userService.resetDaySendCount({ env })
-		await emailService.completeReceiveAll({ env })
-		await oauthService.clearNoBindOathUser({ env })
-	},
+        return env.assets.fetch(req);
+    },
+    email: email,
+    async scheduled(c, env, ctx) {
+        await verifyRecordService.clearRecord({ env });
+        await userService.resetDaySendCount({ env });
+        await emailService.completeReceiveAll({ env });
+        await oauthService.clearNoBindOathUser({ env });
+    },
 };
