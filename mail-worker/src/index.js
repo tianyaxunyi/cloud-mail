@@ -10,28 +10,28 @@ export default {
 	async fetch(req, env, ctx) {
 		const url = new URL(req.url);
 
-		// 1. 强制处理所有 OPTIONS 请求 (解决 CORS 和 Mixed Content 预检)
+		// 1. 跨域预检处理
+		const corsHeaders = {
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+			"Access-Control-Allow-Headers": "Content-Type, Authorization",
+		};
+
 		if (req.method === "OPTIONS") {
-			return new Response(null, {
-				headers: {
-					"Access-Control-Allow-Origin": "*",
-					"Access-Control-Allow-Methods": "POST, OPTIONS, GET",
-					"Access-Control-Allow-Headers": "Content-Type, Authorization",
-					"Access-Control-Max-Age": "86400",
-				}
-			});
+			return new Response(null, { headers: corsHeaders });
 		}
 
-		// 2. 拦截发信路由：无论是外部调用还是 UI 内部点击发送
+		// 2. 判定请求路径
 		const isExternal = url.pathname === '/api/external/send';
-		const isInternalUI = url.pathname === '/api/mail/send';
+		const isInternalUI = url.pathname.includes('/mail/send');
 
 		if ((isExternal || isInternalUI) && req.method === 'POST') {
+			// 只有外部 API 调用才强制检查 AUTH_KEY
 			if (isExternal) {
 				const auth = req.headers.get("Authorization");
 				if (auth !== `Bearer ${env.AUTH_KEY}`) {
 					return new Response(JSON.stringify({ error: "Unauthorized" }), { 
-						status: 401, headers: { "Access-Control-Allow-Origin": "*" } 
+						status: 401, headers: corsHeaders 
 					});
 				}
 			}
@@ -39,15 +39,15 @@ export default {
 			try {
 				const body = await req.json();
 				
-				// 参数适配：UI 传 from/to/content，外部 API 传 fromEmail/toEmail/htmlContent
+				// 适配逻辑
 				const sendData = {
 					sender: { 
-						email: isInternalUI ? body.from : body.fromEmail, 
-						name: env.admin || "Cloud Mail" 
+						email: body.from || body.fromEmail, 
+						name: env.admin || "Cloud Mail Service" 
 					},
-					to: [{ email: isInternalUI ? body.to : body.toEmail }],
+					to: [{ email: body.to || body.toEmail }],
 					subject: body.subject,
-					htmlContent: isInternalUI ? body.content : (body.htmlContent || body.text),
+					htmlContent: body.content || body.htmlContent || body.text,
 					attachment: body.attachments || [] 
 				};
 
@@ -63,30 +63,25 @@ export default {
 
 				const result = await res.json();
 				
-				// 返回 200 成功状态码给 UI，防止界面弹出错误
+				// 即使 Brevo 报错也给 UI 返回 200，防止它弹出“API key invalid”
 				return new Response(JSON.stringify(result), { 
 					status: 200, 
-					headers: { 
-						"Content-Type": "application/json", 
-						"Access-Control-Allow-Origin": "*" 
-					}
+					headers: { "Content-Type": "application/json", ...corsHeaders }
 				});
 			} catch (err) {
 				return new Response(JSON.stringify({ error: err.message }), { 
-					status: 500, 
-					headers: { "Access-Control-Allow-Origin": "*" } 
+					status: 500, headers: corsHeaders 
 				});
 			}
 		}
 
-		// 3. 原有管理后台逻辑 (跳过已拦截的发信请求)
+		// 3. 其他原有逻辑
 		if (url.pathname.startsWith('/api/')) {
 			url.pathname = url.pathname.replace('/api', '');
 			req = new Request(url.toString(), req);
 			return app.fetch(req, env, ctx);
 		}
 
-		// 4. 静态资源与 R2 附件读取 (用于显示收到的图片/视频)
 		if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
 			return await kvObjService.toObjResp( { env }, url.pathname.substring(1));
 		}
