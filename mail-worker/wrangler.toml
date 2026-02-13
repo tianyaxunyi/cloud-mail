@@ -33,7 +33,7 @@ admin = "lala@pj.edu.kg"
 domain = ["pj.edu.kg", "ava.us.ci"] 
 jwt_secret = "1102"
 # 添加你在 Brevo 设置的授权密钥
-AUTH_KEY = "woshinibaba"
+AUTH_KEY = ""
 
 [build]
 command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run build"
